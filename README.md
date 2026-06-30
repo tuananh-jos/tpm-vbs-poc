@@ -103,27 +103,52 @@ dump is ASCII for `VBS-TOP-SECRET-2026!!`. In the ON run that sequence is absent
 
 ## Building from source
 
-### 1. Get and build TSS.CPP (already done in tpm-work)
+### 1. Get and build TSS.CPP
+
+TSS.CPP is the C++ library that provides the TPM API (`tpm.CreatePrimary()`,
+`tpm.StartAuthSession()`, `tpm.RSA_Decrypt()`, …). Without it you would have to hand-craft
+binary TPM command packets. Building it produces `TSS.CPP.lib` (linked into the exe) and
+`TSS.CPP.dll` (needed at runtime).
 
 ```bat
 git clone https://github.com/microsoft/TSS.MSR.git
-:: Open TSS.MSR\TSS.CPP\TSS.CPP.sln in Visual Studio, build Release x64.
-:: Outputs: TSS.MSR\TSS.CPP\bin\x64\Release\TSS.CPP.lib  +  TSS.CPP.dll
 ```
 
-### 2. Get and build the simulator (already done in tpm-work)
+Open `TSS.MSR\TSS.CPP\TSS.CPP.sln` in Visual Studio 2019 or 2022, select
+**Release / x64**, and build the `TSS.CPP` project.
 
-The CMake build in `tpm-work/sim-build2` produced `Simulator.exe`.
+Output: `TSS.MSR\TSS.CPP\bin\x64\Release\TSS.CPP.lib` and `TSS.CPP.dll`.
+
+### 2. Get and build the TPM simulator
+
+The TPM is normally a chip soldered onto the motherboard. The simulator is a software replica
+that listens on TCP 2321/2322 and behaves exactly like real hardware — so the PoC works
+without a physical TPM chip.
+
+```bat
+git clone https://github.com/microsoft/ms-tpm-20-ref.git
+cd ms-tpm-20-ref\TPMCmd
+cmake -B build -A x64
+cmake --build build --config Release
+```
+
+Output: `ms-tpm-20-ref\TPMCmd\build\Simulator\Release\Simulator.exe`.
+
+> **Note:** building the simulator requires OpenSSL. The easiest way on Windows is to install
+> it via `winget install ShiningLight.OpenSSL` or use a pre-built binary from
+> https://slproweb.com/products/Win32OpenSSL.html, then add its `lib` and `include` to the
+> CMake prefix path if the configure step complains.
 
 ### 3. Build this PoC
 
 ```bat
+git clone https://github.com/tuananh-jos/tpm-vbs-poc.git
 cd tpm-vbs-poc
-..\tpm-work\build_poc.bat
+build.bat C:\path\to\TSS.MSR\TSS.CPP
 ```
 
-The script calls `vcvars64.bat`, compiles `vbs_poc.cpp`, and copies `TSS.CPP.dll` next to the
-executable (the DLL must be in the same directory at runtime).
+`build.bat` auto-detects Visual Studio, compiles `vbs_poc.cpp`, and copies `TSS.CPP.dll`
+next to the executable (the DLL must be in the same directory at runtime).
 
 ---
 
