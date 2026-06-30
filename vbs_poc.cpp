@@ -56,8 +56,11 @@
 #include <string>
 #include <stdexcept>
 #include <vector>
+#include <windows.h>
+#include <enclaveapi.h>
 
 #include "Tpm2.h"
+#include "enclave/tpm_enclave_shared.h"
 
 using namespace TpmCpp;
 using namespace std;
@@ -173,11 +176,85 @@ static void runDelivery(Tpm2& tpm, Vtl0LoggingDevice& vtl0,
 
 int main(int argc, char* argv[])
 {
-    bool useRealTpm = false;
-    for (int i = 1; i < argc; i++)
-        if (string(argv[i]) == "--real-tpm") useRealTpm = true;
+    bool useRealTpm   = false;
+    bool useVbsEnclave = false;
+    for (int i = 1; i < argc; i++) {
+        if (string(argv[i]) == "--real-tpm")    useRealTpm    = true;
+        if (string(argv[i]) == "--vbs-enclave") useVbsEnclave = true;
+    }
 
     try {
+
+        // ======================== VBS ENCLAVE PATH ==============================
+        if (useVbsEnclave) {
+            cout << "=== VBS Enclave mode ===\n"
+                 << "Host (VTL0) creates enclave, passes C to it; SECRET stays in VTL1.\n\n";
+
+            // Load the enclave DLL into a VBS enclave (VTL1).
+            ENCLAVE_CREATE_INFO_VBS cfg = { IMAGE_ENCLAVE_POLICY_DEBUGGABLE };
+            HANDLE hEnc = CreateEnclave(GetCurrentProcess(), NULL,
+                                        0x10000000 /*256MB*/, 0,
+                                        ENCLAVE_TYPE_VBS,
+                                        &cfg, sizeof(cfg), NULL);
+            if (!hEnc || hEnc == INVALID_HANDLE_VALUE) {
+                cerr << "CreateEnclave failed: " << GetLastError()
+                     << "\n(Hyper-V / VBS must be enabled. Run as Administrator.)\n";
+                return 1;
+            }
+
+            if (!LoadEnclaveImage(hEnc, L"tpm_enclave.dll")) {
+                cerr << "LoadEnclaveImage failed: " << GetLastError() << "\n";
+                return 1;
+            }
+            if (!InitializeEnclave(GetCurrentProcess(), hEnc, NULL, 0, NULL)) {
+                cerr << "InitializeEnclave failed: " << GetLastError() << "\n";
+                return 1;
+            }
+            cout << "[Enclave] VBS enclave loaded into VTL1.\n";
+
+            // Phase 1: enclave creates wrapKey + EK in TPM, returns tpm-pub.
+            EnclavePhase1Out p1out = {};
+            LPVOID ret1 = NULL;
+            if (!CallEnclave((LPENCLAVE_ROUTINE)EnclaveCreateWrapKey,
+                             &p1out, TRUE, &ret1) || !p1out.success) {
+                cerr << "EnclaveCreateWrapKey failed: " << p1out.error << "\n";
+                return 1;
+            }
+            cout << "[VTL1 -> VTL0] tpm-pub exported (" << p1out.tpmPubSize
+                 << " bytes). Server can now encrypt SECRET.\n";
+
+            // Phase 1.5 (Server, runs in VTL0): deserialize tpm-pub, encrypt SECRET.
+            // In production the Server is a remote machine; here it's in-process.
+            ByteVec pubBytes(p1out.tpmPub, p1out.tpmPub + p1out.tpmPubSize);
+            TPMT_PUBLIC tpmPub;
+            tpmPub.fromBytes(pubBytes);
+
+            string secretStr = "VBS-TOP-SECRET-2026!!";
+            ByteVec SECRET(secretStr.begin(), secretStr.end());
+            ByteVec C = tpmPub.Encrypt(SECRET, null);
+            cout << "[VTL0 / Server] C = tpm-pub(SECRET) = " << C.size()
+                 << " bytes. Handing C to enclave.\n\n";
+
+            // Phase 2: pass C into enclave; enclave decrypts via salted session;
+            // SECRET stays in VTL1 -- only byte count comes back to VTL0.
+            EnclavePhase2In  p2in  = {};
+            EnclavePhase2Out p2out = {};
+            p2in.ciphertextSize = (DWORD)C.size();
+            memcpy(p2in.ciphertext, C.data(), C.size());
+
+            struct { EnclavePhase2In* in; EnclavePhase2Out* out; } p2ctx = { &p2in, &p2out };
+            LPVOID ret2 = NULL;
+            if (!CallEnclave((LPENCLAVE_ROUTINE)EnclaveDecryptSecret,
+                             &p2ctx, TRUE, &ret2) || !p2out.success) {
+                cerr << "EnclaveDecryptSecret failed: " << p2out.error << "\n";
+                return 1;
+            }
+
+            cout << "[VTL1] " << p2out.message << "\n";
+            cout << "[VTL0] Host received status only -- SECRET never left VTL1.\n";
+            return 0;
+        }
+
         Tpm2 tpm;
 
         // --- Transport (VTL0) + TPM connection ----------------------------------
