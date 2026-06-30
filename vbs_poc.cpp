@@ -171,17 +171,76 @@ static void runDelivery(Tpm2& tpm, Vtl0LoggingDevice& vtl0,
     tpm.FlushContext(channel);
 }
 
-int main()
+int main(int argc, char* argv[])
 {
+    bool useRealTpm = false;
+    for (int i = 1; i < argc; i++)
+        if (string(argv[i]) == "--real-tpm") useRealTpm = true;
+
     try {
+        Tpm2 tpm;
+
         // --- Transport (VTL0) + TPM connection ----------------------------------
+        // Default: Microsoft TPM simulator over TCP (ms-tpm-20-ref, port 2321).
+        // Pass --real-tpm to use the hardware TPM via Windows TBS instead.
+        if (useRealTpm) {
+            TpmTbsDevice* tbs = new TpmTbsDevice();
+            if (!tbs->Connect()) {
+                cerr << "Could not connect to the real TPM via Windows TBS.\n"
+                     << "Make sure you are running as Administrator and TPM is enabled.\n";
+                return 1;
+            }
+            tpm._SetDevice(*tbs);
+            cout << "Connected to REAL TPM via Windows TBS. (No VTL0 wire tap available.)\n\n";
+
+            // Run the PoC without the logging tap (real TPM path).
+            // Re-use runDelivery with a dummy vtl0 that never captures.
+            Vtl0LoggingDevice dummy;
+
+            TPMT_PUBLIC wrapTemplate(
+                TPM_ALG_ID::SHA1,
+                TPMA_OBJECT::decrypt | TPMA_OBJECT::userWithAuth | TPMA_OBJECT::sensitiveDataOrigin
+                    | TPMA_OBJECT::fixedTPM | TPMA_OBJECT::fixedParent,
+                null,
+                TPMS_RSA_PARMS(null, TPMS_SCHEME_OAEP(TPM_ALG_ID::SHA1), 2048, 65537),
+                TPM2B_PUBLIC_KEY_RSA());
+            auto wrapKey = tpm.CreatePrimary(TPM_RH::OWNER, null, wrapTemplate, null, null);
+            TPMT_PUBLIC tpmPub = wrapKey.outPublic;
+
+            TPMT_PUBLIC ekTemplate(
+                TPM_ALG_ID::SHA1,
+                TPMA_OBJECT::decrypt | TPMA_OBJECT::restricted | TPMA_OBJECT::fixedTPM
+                    | TPMA_OBJECT::fixedParent | TPMA_OBJECT::sensitiveDataOrigin
+                    | TPMA_OBJECT::userWithAuth,
+                null,
+                TPMS_RSA_PARMS(Aes128Cfb, TPMS_NULL_ASYM_SCHEME(), 2048, 65537),
+                TPM2B_PUBLIC_KEY_RSA());
+            auto ek = tpm.CreatePrimary(TPM_RH::ENDORSEMENT, null, ekTemplate, null, null);
+            TPMT_PUBLIC ekPub = ek.outPublic;
+
+            cout << "[A] wrapKey and EK created inside the REAL TPM.\n";
+
+            string secretStr = "VBS-TOP-SECRET-2026!!";
+            ByteVec SECRET(secretStr.begin(), secretStr.end());
+            ByteVec C = tpmPub.Encrypt(SECRET, null);
+            cout << "[B] Server: SECRET = \"" << secretStr << "\"\n";
+            cout << "    C = tpm-pub(SECRET) = " << C.size() << " bytes.\n\n";
+
+            runDelivery(tpm, dummy, ek.handle, ekPub, wrapKey.handle, C, SECRET, false);
+            runDelivery(tpm, dummy, ek.handle, ekPub, wrapKey.handle, C, SECRET, true);
+
+            tpm.FlushContext(wrapKey.handle);
+            tpm.FlushContext(ek.handle);
+            return 0;
+        }
+
+        // --- Simulator path (default) -------------------------------------------
         Vtl0LoggingDevice vtl0("127.0.0.1", 2321);
         if (!vtl0.Connect()) {
             cerr << "Could not connect to the TPM simulator at 127.0.0.1:2321.\n"
                  << "Start the Microsoft TPM simulator (ms-tpm-20-ref) first. See README.\n";
             return 1;
         }
-        Tpm2 tpm;
         tpm._SetDevice(vtl0);
         vtl0.PowerOn();                                  // BIOS would normally do this
         tpm._AllowErrors().Startup(TPM_SU::CLEAR);       // tolerate an already-started TPM
