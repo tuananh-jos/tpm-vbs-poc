@@ -10,7 +10,7 @@ set "TSS=%~1"
 
 rem Find and load MSVC environment (tries VS 2022 then VS 2019)
 set "VCVARS="
-for %%Y in (2022 2019) do (
+for %%Y in (2022 2019 18 17) do (
     for %%E in (Community Professional Enterprise) do (
         if exist "C:\Program Files\Microsoft Visual Studio\%%Y\%%E\VC\Auxiliary\Build\vcvars64.bat" (
             if not defined VCVARS set "VCVARS=C:\Program Files\Microsoft Visual Studio\%%Y\%%E\VC\Auxiliary\Build\vcvars64.bat"
@@ -37,7 +37,7 @@ echo Enclave DLL: tpm_enclave.dll
 rem --- 2. Build host EXE (VTL0) -----------------------------------------------
 echo Building host EXE...
 cl %CL_FLAGS% vbs_poc.cpp /Fe:vbs_poc.exe ^
-   /link %LINK_FLAGS%
+   /link %LINK_FLAGS% onecore.lib
 if %ERRORLEVEL% neq 0 ( echo HOST BUILD FAILED. & exit /b %ERRORLEVEL% )
 
 rem TSS.CPP.dll must sit next to the exe at runtime.

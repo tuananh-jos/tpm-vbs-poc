@@ -56,6 +56,7 @@
 #include <string>
 #include <stdexcept>
 #include <vector>
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <enclaveapi.h>
 
@@ -202,7 +203,7 @@ int main(int argc, char* argv[])
                 return 1;
             }
 
-            if (!LoadEnclaveImage(hEnc, L"tpm_enclave.dll")) {
+            if (!LoadEnclaveImageA(hEnc, "tpm_enclave.dll")) {
                 cerr << "LoadEnclaveImage failed: " << GetLastError() << "\n";
                 return 1;
             }
@@ -212,11 +213,25 @@ int main(int argc, char* argv[])
             }
             cout << "[Enclave] VBS enclave loaded into VTL1.\n";
 
+            // Get function pointers from the enclave DLL.
+            // LoadLibrary here loads it into VTL0 address space for symbol resolution only;
+            // CallEnclave dispatches the actual execution into the VTL1 enclave.
+            HMODULE hEncDll = LoadLibraryA("tpm_enclave.dll");
+            if (!hEncDll) {
+                cerr << "LoadLibrary(tpm_enclave.dll) failed: " << GetLastError() << "\n";
+                return 1;
+            }
+            auto fnCreateKey = (LPENCLAVE_ROUTINE)GetProcAddress(hEncDll, "EnclaveCreateWrapKey");
+            auto fnDecrypt   = (LPENCLAVE_ROUTINE)GetProcAddress(hEncDll, "EnclaveDecryptSecret");
+            if (!fnCreateKey || !fnDecrypt) {
+                cerr << "GetProcAddress failed: " << GetLastError() << "\n";
+                return 1;
+            }
+
             // Phase 1: enclave creates wrapKey + EK in TPM, returns tpm-pub.
             EnclavePhase1Out p1out = {};
             LPVOID ret1 = NULL;
-            if (!CallEnclave((LPENCLAVE_ROUTINE)EnclaveCreateWrapKey,
-                             &p1out, TRUE, &ret1) || !p1out.success) {
+            if (!CallEnclave(fnCreateKey, &p1out, TRUE, &ret1) || !p1out.success) {
                 cerr << "EnclaveCreateWrapKey failed: " << p1out.error << "\n";
                 return 1;
             }
@@ -244,8 +259,7 @@ int main(int argc, char* argv[])
 
             struct { EnclavePhase2In* in; EnclavePhase2Out* out; } p2ctx = { &p2in, &p2out };
             LPVOID ret2 = NULL;
-            if (!CallEnclave((LPENCLAVE_ROUTINE)EnclaveDecryptSecret,
-                             &p2ctx, TRUE, &ret2) || !p2out.success) {
+            if (!CallEnclave(fnDecrypt, &p2ctx, TRUE, &ret2) || !p2out.success) {
                 cerr << "EnclaveDecryptSecret failed: " << p2out.error << "\n";
                 return 1;
             }

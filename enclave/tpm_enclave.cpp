@@ -15,6 +15,7 @@
  *
  * VBS ENCLAVE CONFIG (required -- informs the loader this is an enclave image):
  */
+#define WIN32_LEAN_AND_MEAN   // prevents windows.h from pulling in winsock.h (conflicts with TSS.CPP's winsock2.h)
 #include <windows.h>
 #include <enclaveapi.h>
 
