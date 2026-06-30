@@ -127,7 +127,8 @@ static string asAscii(const ByteVec& v) { return string(v.begin(), v.end()); }
 static void runDelivery(Tpm2& tpm, Vtl0LoggingDevice& vtl0,
                         TPM_HANDLE ekHandle, TPMT_PUBLIC& ekPub,
                         TPM_HANDLE wrapKey, const ByteVec& C,
-                        const ByteVec& SECRET, bool encryptResponse)
+                        const ByteVec& SECRET, bool encryptResponse,
+                        bool wireTapAvailable = true)
 {
     cout << "================  Delivery: RESPONSE ENCRYPTION "
          << (encryptResponse ? "ON " : "OFF") << "  ================\n";
@@ -156,18 +157,23 @@ static void runDelivery(Tpm2& tpm, Vtl0LoggingDevice& vtl0,
     vtl0.Capture = false;
 
     // --- E. What did VTL0 actually see? -----------------------------------------
-    const ByteVec& wireCmd  = vtl0.LastCommand;
-    const ByteVec& wireResp = vtl0.LastResponse;
-    bool leaked = wireContains(wireResp, SECRET);
-
     cout << "  channel: salted HMAC session, tpmKey = EK, " << salt.size()
          << "-byte salt, AES-128-CFB\n";
-    cout << "  RSA_Decrypt COMMAND  on VTL0 wire (" << wireCmd.size() << " bytes):\n";
-    cout << "    " << toHex(wireCmd) << "\n";
-    cout << "  RSA_Decrypt RESPONSE on VTL0 wire (" << wireResp.size() << " bytes):\n";
-    cout << "    " << toHex(wireResp) << "\n";
-    cout << "  SECRET plaintext visible on the wire? : "
-         << (leaked ? "YES   <-- LEAKED to VTL0" : "no    <-- protected from VTL0") << "\n";
+
+    if (wireTapAvailable) {
+        const ByteVec& wireCmd  = vtl0.LastCommand;
+        const ByteVec& wireResp = vtl0.LastResponse;
+        bool leaked = wireContains(wireResp, SECRET);
+        cout << "  RSA_Decrypt COMMAND  on VTL0 wire (" << wireCmd.size() << " bytes):\n";
+        cout << "    " << toHex(wireCmd) << "\n";
+        cout << "  RSA_Decrypt RESPONSE on VTL0 wire (" << wireResp.size() << " bytes):\n";
+        cout << "    " << toHex(wireResp) << "\n";
+        cout << "  SECRET plaintext visible on the wire? : "
+             << (leaked ? "YES   <-- LEAKED to VTL0" : "no    <-- protected from VTL0") << "\n";
+    } else {
+        cout << "  Wire tap: N/A (real TPM uses physical SPI/LPC bus -- needs logic analyzer).\n";
+        cout << "  Expected: OFF leaks plaintext on bus; ON protects with AES-128-CFB.\n";
+    }
     cout << "  VBS recovered SECRET                  : \"" << asAscii(recovered) << "\"\n";
     cout << "  recovered == original SECRET?         : "
          << ((recovered == SECRET) ? "yes" : "NO") << "\n\n";
@@ -317,8 +323,8 @@ int main(int argc, char* argv[])
             cout << "[B] Server: SECRET = \"" << secretStr << "\"\n";
             cout << "    C = tpm-pub(SECRET) = " << C.size() << " bytes.\n\n";
 
-            runDelivery(tpm, dummy, ek.handle, ekPub, wrapKey.handle, C, SECRET, false);
-            runDelivery(tpm, dummy, ek.handle, ekPub, wrapKey.handle, C, SECRET, true);
+            runDelivery(tpm, dummy, ek.handle, ekPub, wrapKey.handle, C, SECRET, false, false);
+            runDelivery(tpm, dummy, ek.handle, ekPub, wrapKey.handle, C, SECRET, true,  false);
 
             tpm.FlushContext(wrapKey.handle);
             tpm.FlushContext(ek.handle);
