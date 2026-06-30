@@ -154,6 +154,8 @@ next to the executable (the DLL must be in the same directory at runtime).
 
 ## Running
 
+### Mode 1 — Simulator (default, full wire tap)
+
 **Step 1** — start the simulator in a separate window (or minimized):
 
 ```bat
@@ -171,6 +173,51 @@ vbs_poc.exe
 > **Rerunning:** if the PoC exits abnormally, the simulator may still hold loaded key handles.
 > Restart the simulator before running again (the normal exit path flushes all handles, but a
 > crash skips that). The error `TPM_RC::OBJECT_MEMORY` is the symptom.
+
+### Mode 2 — Real hardware TPM (no wire tap)
+
+No simulator needed. Run as Administrator:
+
+```bat
+vbs_poc.exe --real-tpm
+```
+
+Expected output:
+
+```
+Connected to REAL TPM via Windows TBS. (No VTL0 wire tap available.)
+
+[A.1] TPM2_CreatePrimary: creating wrapKey (RSA-2048 decrypt) in OWNER hierarchy...
+       -> handle 0x80000000  tpm-pub = 256-byte RSA modulus
+       -> tpm-priv NEVER leaves the chip.
+[A.2] TPM2_CreatePrimary: creating EK (RSA-2048 restricted decrypt) in ENDORSEMENT hierarchy...
+       -> handle 0x80000001  (used only as salt key for salted session)
+
+[B]   Server: SECRET = "VBS-TOP-SECRET-2026!!" (21 bytes)
+      Server: RSA-OAEP encrypting SECRET to tpm-pub...
+      Server: C = tpm-pub(SECRET) = 256 bytes ciphertext  -> handed to VBS.
+
+================  Delivery: RESPONSE ENCRYPTION OFF  ================
+  channel: salted HMAC session, tpmKey = EK, 20-byte salt, AES-128-CFB
+  Wire tap: N/A (real TPM uses physical SPI/LPC bus -- needs logic analyzer).
+  Expected: OFF leaks plaintext on bus; ON protects with AES-128-CFB.
+  VBS recovered SECRET                  : "VBS-TOP-SECRET-2026!!"
+  recovered == original SECRET?         : yes
+
+================  Delivery: RESPONSE ENCRYPTION ON   ================
+  channel: salted HMAC session, tpmKey = EK, 20-byte salt, AES-128-CFB
+  Wire tap: N/A (real TPM uses physical SPI/LPC bus -- needs logic analyzer).
+  Expected: OFF leaks plaintext on bus; ON protects with AES-128-CFB.
+  VBS recovered SECRET                  : "VBS-TOP-SECRET-2026!!"
+  recovered == original SECRET?         : yes
+
+[Cleanup] TPM2_FlushContext: releasing wrapKey and EK handles.
+```
+
+The wire tap is unavailable because the real TPM communicates over a physical SPI or LPC bus.
+To observe the OFF vs ON difference on real hardware you would need a logic analyzer attached
+to that bus. Functionally, both modes decrypt correctly and the step-by-step log confirms each
+TPM command issued.
 
 ---
 

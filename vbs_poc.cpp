@@ -294,6 +294,8 @@ int main(int argc, char* argv[])
             // Re-use runDelivery with a dummy vtl0 that never captures.
             Vtl0LoggingDevice dummy;
 
+            // ---- A.1 wrapKey -------------------------------------------------------
+            cout << "[A.1] TPM2_CreatePrimary: creating wrapKey (RSA-2048 decrypt) in OWNER hierarchy...\n";
             TPMT_PUBLIC wrapTemplate(
                 TPM_ALG_ID::SHA1,
                 TPMA_OBJECT::decrypt | TPMA_OBJECT::userWithAuth | TPMA_OBJECT::sensitiveDataOrigin
@@ -303,7 +305,12 @@ int main(int argc, char* argv[])
                 TPM2B_PUBLIC_KEY_RSA());
             auto wrapKey = tpm.CreatePrimary(TPM_RH::OWNER, null, wrapTemplate, null, null);
             TPMT_PUBLIC tpmPub = wrapKey.outPublic;
+            cout << "       -> handle 0x" << hex << wrapKey.handle.handle << dec
+                 << "  tpm-pub = " << tpmPub.unique->toBytes().size() << "-byte RSA modulus\n"
+                 << "       -> tpm-priv NEVER leaves the chip.\n";
 
+            // ---- A.2 EK ------------------------------------------------------------
+            cout << "[A.2] TPM2_CreatePrimary: creating EK (RSA-2048 restricted decrypt) in ENDORSEMENT hierarchy...\n";
             TPMT_PUBLIC ekTemplate(
                 TPM_ALG_ID::SHA1,
                 TPMA_OBJECT::decrypt | TPMA_OBJECT::restricted | TPMA_OBJECT::fixedTPM
@@ -314,18 +321,22 @@ int main(int argc, char* argv[])
                 TPM2B_PUBLIC_KEY_RSA());
             auto ek = tpm.CreatePrimary(TPM_RH::ENDORSEMENT, null, ekTemplate, null, null);
             TPMT_PUBLIC ekPub = ek.outPublic;
+            cout << "       -> handle 0x" << hex << ek.handle.handle << dec
+                 << "  (used only as salt key for salted session)\n";
 
-            cout << "[A] wrapKey and EK created inside the REAL TPM.\n";
-
+            // ---- B. Server ---------------------------------------------------------
             string secretStr = "VBS-TOP-SECRET-2026!!";
             ByteVec SECRET(secretStr.begin(), secretStr.end());
+            cout << "\n[B]   Server: SECRET = \"" << secretStr << "\" (" << SECRET.size() << " bytes)\n";
+            cout << "      Server: RSA-OAEP encrypting SECRET to tpm-pub...\n";
             ByteVec C = tpmPub.Encrypt(SECRET, null);
-            cout << "[B] Server: SECRET = \"" << secretStr << "\"\n";
-            cout << "    C = tpm-pub(SECRET) = " << C.size() << " bytes.\n\n";
+            cout << "      Server: C = tpm-pub(SECRET) = " << C.size()
+                 << " bytes ciphertext  -> handed to VBS.\n\n";
 
             runDelivery(tpm, dummy, ek.handle, ekPub, wrapKey.handle, C, SECRET, false, false);
             runDelivery(tpm, dummy, ek.handle, ekPub, wrapKey.handle, C, SECRET, true,  false);
 
+            cout << "[Cleanup] TPM2_FlushContext: releasing wrapKey and EK handles.\n";
             tpm.FlushContext(wrapKey.handle);
             tpm.FlushContext(ek.handle);
             return 0;
