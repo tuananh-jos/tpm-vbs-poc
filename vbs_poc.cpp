@@ -152,13 +152,16 @@ static void runDelivery(Tpm2& tpm, Vtl0LoggingDevice& vtl0,
     vtl0.Capture = false;
 
     // --- E. What did VTL0 actually see? -----------------------------------------
-    const ByteVec& wire = vtl0.LastResponse;
-    bool leaked = wireContains(wire, SECRET);
+    const ByteVec& wireCmd  = vtl0.LastCommand;
+    const ByteVec& wireResp = vtl0.LastResponse;
+    bool leaked = wireContains(wireResp, SECRET);
 
     cout << "  channel: salted HMAC session, tpmKey = EK, " << salt.size()
          << "-byte salt, AES-128-CFB\n";
-    cout << "  RSA_Decrypt RESPONSE on VTL0 wire (" << wire.size() << " bytes):\n";
-    cout << "    " << toHex(wire) << "\n";
+    cout << "  RSA_Decrypt COMMAND  on VTL0 wire (" << wireCmd.size() << " bytes):\n";
+    cout << "    " << toHex(wireCmd) << "\n";
+    cout << "  RSA_Decrypt RESPONSE on VTL0 wire (" << wireResp.size() << " bytes):\n";
+    cout << "    " << toHex(wireResp) << "\n";
     cout << "  SECRET plaintext visible on the wire? : "
          << (leaked ? "YES   <-- LEAKED to VTL0" : "no    <-- protected from VTL0") << "\n";
     cout << "  VBS recovered SECRET                  : \"" << asAscii(recovered) << "\"\n";
