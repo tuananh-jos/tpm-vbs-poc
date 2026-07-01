@@ -36,18 +36,18 @@ int main()
         tpm._SetDevice(tbs);
         cout << "    OK\n\n";
 
-        // -- wrapKey --
-        cout << "[2] TPM creates wrapKey inside chip (tpm-priv never leaves).\n";
-        TPMT_PUBLIC wrapTemplate(
+        // -- key pair (tpm-pub / tpm-priv) --
+        cout << "[2] TPM creates key pair inside chip (tpm-priv never leaves).\n";
+        TPMT_PUBLIC keyPairTemplate(
             TPM_ALG_ID::SHA1,
             TPMA_OBJECT::decrypt | TPMA_OBJECT::userWithAuth | TPMA_OBJECT::sensitiveDataOrigin
                 | TPMA_OBJECT::fixedTPM | TPMA_OBJECT::fixedParent,
             null,
             TPMS_RSA_PARMS(null, TPMS_SCHEME_OAEP(TPM_ALG_ID::SHA1), 2048, 65537),
             TPM2B_PUBLIC_KEY_RSA());
-        auto wrapKey = tpm.CreatePrimary(TPM_RH::OWNER, null, wrapTemplate, null, null);
-        ByteVec tpmPub = wrapKey.outPublic.unique->toBytes();
-        cout << "    handle  : 0x" << hex << wrapKey.handle.handle << dec << "\n";
+        auto keyPair = tpm.CreatePrimary(TPM_RH::OWNER, null, keyPairTemplate, null, null);
+        ByteVec tpmPub = keyPair.outPublic.unique->toBytes();
+        cout << "    handle  : 0x" << hex << keyPair.handle.handle << dec << "\n";
         cout << "    tpm-pub : " << toHex(tpmPub) << "\n\n";
 
         // -- EK --
@@ -62,18 +62,18 @@ int main()
             TPMS_RSA_PARMS(Aes128Cfb, TPMS_NULL_ASYM_SCHEME(), 2048, 65537),
             TPM2B_PUBLIC_KEY_RSA());
         auto ek = tpm.CreatePrimary(TPM_RH::ENDORSEMENT, null, ekTemplate, null, null);
-        ByteVec ekPubBytes = ek.outPublic.unique->toBytes();
+        ByteVec ekPub = ek.outPublic.unique->toBytes();
         cout << "    handle  : 0x" << hex << ek.handle.handle << dec << "\n";
-        cout << "    EK-pub  : " << toHex(ekPubBytes) << "\n\n";
+        cout << "    EK-pub  : " << toHex(ekPub) << "\n\n";
 
         // -- External encrypts sessionKey --
         string sessionKeyStr = "TOP-SECRET-2026!!";
         ByteVec sessionKey(sessionKeyStr.begin(), sessionKeyStr.end());
         cout << "[4] External: sessionKey = \"" << sessionKeyStr << "\"\n";
-        ByteVec C = wrapKey.outPublic.Encrypt(sessionKey, null);
+        ByteVec C = keyPair.outPublic.Encrypt(sessionKey, null);
         cout << "    C = tpm-pub(sessionKey)\n";
         cout << "    C : " << toHex(C) << "\n";
-        cout << "    Only the TPM can open C.\n\n";
+        cout << "    Only tpm-priv (inside chip) can open C.\n\n";
 
         // -- Salt --
         cout << "[5] External generates salt.\n";
@@ -95,19 +95,19 @@ int main()
         cout << "    Session established.\n\n";
 
         // -- Decrypt --
-        cout << "[7] RSA_Decrypt(wrapKey, C) over session.\n";
-        cout << "    TPM decrypts C -> sessionKey (inside chip).\n";
+        cout << "[7] RSA_Decrypt(tpm-priv, C) over session.\n";
+        cout << "    tpm-priv decrypts C -> sessionKey (inside chip).\n";
         cout << "    TPM sends secret(sessionKey) over transport.\n";
         cout << "    TSS.CPP decrypts -> sessionKey in memory.\n";
         ByteVec recovered = tpm[session].RSA_Decrypt(
-            wrapKey.handle, C, TPMS_NULL_ASYM_SCHEME(), null);
+            keyPair.handle, C, TPMS_NULL_ASYM_SCHEME(), null);
         cout << "    recovered : \"" << string(recovered.begin(), recovered.end()) << "\"\n";
         cout << "    correct   : " << (recovered == sessionKey ? "yes" : "NO -- MISMATCH") << "\n\n";
 
         // -- Cleanup --
-        cout << "[8] FlushContext: releasing session, wrapKey, EK.\n";
+        cout << "[8] FlushContext: releasing session, key pair, EK.\n";
         tpm.FlushContext(session);
-        tpm.FlushContext(wrapKey.handle);
+        tpm.FlushContext(keyPair.handle);
         tpm.FlushContext(ek.handle);
         cout << "    Done.\n";
     }
