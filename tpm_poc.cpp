@@ -51,7 +51,7 @@ int main()
         cout << "    SPCK-pub : " << toHex(spckPub) << "\n\n";
 
         // -- EK --
-        cout << "[3] TPM creates EK inside chip (EK-priv never leaves).\n";
+        cout << "[3] TPM derives EK into transient handle (pre-exists in chip, EK-priv never leaves).\n";
         cout << "    Role: used only to hide salt from transport.\n";
         TPMT_PUBLIC ekTemplate(
             TPM_ALG_ID::SHA1,

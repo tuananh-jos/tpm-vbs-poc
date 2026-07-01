@@ -22,7 +22,7 @@ Proof-of-concept: TPM receives an encrypted `sessionKey`, decrypts it inside the
 
 ```
 1. TPM creates key pair (SPCK-pub / SPCK-priv) inside chip. SPCK-priv never leaves.
-2. TPM creates EK inside chip. EK-priv never leaves.
+2. TPM derives EK into transient handle (EK pre-exists in chip, manufacturer-provisioned).
 
 3. External: C = SPCK-pub(sessionKey)
 
@@ -91,7 +91,7 @@ Expected output:
     handle  : 0x80xxxxxx
     SPCK-pub : <256-byte hex>
 
-[3] TPM creates EK inside chip (EK-priv never leaves).
+[3] TPM derives EK into transient handle (pre-exists in chip, EK-priv never leaves).
     handle  : 0x80xxxxxx
     EK-pub  : <256-byte hex>
 
