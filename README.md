@@ -95,12 +95,30 @@ dump is ASCII for `VBS-TOP-SECRET-2026!!`. In the ON run that sequence is absent
 
 ---
 
+## Do you have a real TPM?
+
+First, check whether your machine has a hardware TPM 2.0 chip:
+
+```powershell
+Get-Tpm
+```
+
+| Result | What to use |
+|--------|-------------|
+| `TpmPresent: True`, `TpmReady: True` | Run with `--real-tpm` (no simulator needed) |
+| `TpmPresent: False` or TPM disabled in BIOS | Run with simulator (default mode) |
+
+Both modes produce the same PoC result. The difference is:
+- **Simulator** — software replica of the TPM chip, runs on TCP 2321/2322. Lets you see raw command/response bytes on the wire (full wire tap).
+- **`--real-tpm`** — uses the actual TPM chip via Windows TBS. No wire tap (chip communicates over physical SPI/LPC bus), but proves the mechanism works on real hardware.
+
+---
+
 ## Prerequisites
 
 - **Windows** with Visual Studio 2022 (Community is fine) — the `cl.exe` toolchain.
-- **Microsoft TSS.MSR** (TSS.CPP) — already cloned and built in `../tpm-work/TSS.MSR`.
-- **Microsoft TPM 2.0 simulator** (`ms-tpm-20-ref`) — already built in
-  `../tpm-work/sim-build2/Simulator/Simulator.exe`.
+- **Microsoft TSS.MSR** (TSS.CPP) — C++ TPM API library. Must be cloned and built (see below).
+- **TPM simulator** (`ms-tpm-20-ref`) — only needed if you do **not** have a real TPM chip.
 
 > **Which simulator?** TSS.CPP's `TpmTcpDevice` speaks the Microsoft simulator TCP protocol
 > (command port **2321**, platform port **2322**). This is **not** compatible with `swtpm`.
