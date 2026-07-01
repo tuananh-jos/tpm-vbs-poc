@@ -46,10 +46,8 @@ D. Client recovers SECRET
       TSS.CPP decrypts response with channelKey -> client sees SECRET.
 ```
 
-| Mode | Transport sees | Can recover SECRET? |
-|------|----------------|---------------------|
-| OFF  | SECRET plaintext in response | YES — leaked |
-| ON   | AES-128-CFB ciphertext; channelKey never crossed the transport | NO — protected |
+The PoC runs with response encryption **ON**: the transport sees only `encryptedSalt` and
+AES-128-CFB ciphertext — `channelKey` never crossed the transport in plaintext.
 
 ---
 
@@ -103,15 +101,9 @@ Connected to real TPM via Windows TBS.
 [B] External: SECRET="TOP-SECRET-2026!!"
     C = RSA-OAEP(tpm-pub, SECRET) = 256 bytes
 
-================  Delivery: RESPONSE ENCRYPTION OFF  ================
+[C+D] Delivery (response encryption ON):
   channel : salted HMAC, tpmKey=EK, 20-byte salt, AES-128-CFB
-  wire    : N/A (SPI/LPC bus -- needs logic analyzer to observe OFF vs ON)
-  SECRET  : "TOP-SECRET-2026!!"
-  correct : yes
-
-================  Delivery: RESPONSE ENCRYPTION ON   ================
-  channel : salted HMAC, tpmKey=EK, 20-byte salt, AES-128-CFB
-  wire    : N/A (SPI/LPC bus -- needs logic analyzer to observe OFF vs ON)
+  wire    : N/A (SPI/LPC bus -- needs logic analyzer)
   SECRET  : "TOP-SECRET-2026!!"
   correct : yes
 

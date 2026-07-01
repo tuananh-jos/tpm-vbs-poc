@@ -26,30 +26,23 @@ static const TPMT_SYM_DEF_OBJECT Aes128Cfb { TPM_ALG_ID::AES, 128, TPM_ALG_ID::C
 static string asAscii(const ByteVec& v) { return string(v.begin(), v.end()); }
 
 static void runDelivery(Tpm2& tpm, TPM_HANDLE ekHandle, TPMT_PUBLIC& ekPub,
-                        TPM_HANDLE wrapKey, const ByteVec& C,
-                        const ByteVec& SECRET, bool encryptResponse)
+                        TPM_HANDLE wrapKey, const ByteVec& C, const ByteVec& SECRET)
 {
-    cout << "================  Delivery: RESPONSE ENCRYPTION "
-         << (encryptResponse ? "ON " : "OFF") << "  ================\n";
-
     ByteVec salt          = Helpers::RandomBytes(Crypto::HashLength(TPM_ALG_ID::SHA1));
     ByteVec encryptedSalt = ekPub.EncryptSessionSalt(salt);
 
-    TPMA_SESSION attrs = TPMA_SESSION::continueSession;
-    if (encryptResponse)
-        attrs = attrs | TPMA_SESSION::encrypt;
-
     AUTH_SESSION channel = tpm.StartAuthSession(
         ekHandle, TPM_RH_NULL, TPM_SE::HMAC, TPM_ALG_ID::SHA1,
-        attrs, TPMT_SYM_DEF(TPM_ALG_ID::AES, 128, TPM_ALG_ID::CFB),
+        TPMA_SESSION::continueSession | TPMA_SESSION::encrypt,
+        TPMT_SYM_DEF(TPM_ALG_ID::AES, 128, TPM_ALG_ID::CFB),
         salt, encryptedSalt);
 
     ByteVec recovered = tpm[channel].RSA_Decrypt(wrapKey, C, TPMS_NULL_ASYM_SCHEME(), null);
 
     cout << "  channel : salted HMAC, tpmKey=EK, " << salt.size() << "-byte salt, AES-128-CFB\n";
-    cout << "  wire    : N/A (SPI/LPC bus -- needs logic analyzer to observe OFF vs ON)\n";
+    cout << "  wire    : N/A (SPI/LPC bus -- needs logic analyzer)\n";
     cout << "  SECRET  : \"" << asAscii(recovered) << "\"\n";
-    cout << "  correct : " << ((recovered == SECRET) ? "yes" : "NO -- MISMATCH") << "\n\n";
+    cout << "  correct : " << ((recovered == SECRET) ? "yes" : "NO -- MISMATCH") << "\n";
 
     tpm.FlushContext(channel);
 }
@@ -66,7 +59,7 @@ int main()
         tpm._SetDevice(*tbs);
         cout << "Connected to real TPM via Windows TBS.\n\n";
 
-        // A.1 wrapKey: non-restricted RSA decrypt key. Server encrypts SECRET to tpm-pub.
+        // A.1 wrapKey: non-restricted RSA decrypt key. External encrypts SECRET to tpm-pub.
         //     tpm-priv never leaves the chip.
         cout << "[A.1] CreatePrimary: wrapKey (RSA-2048, OWNER)...\n";
         TPMT_PUBLIC wrapTemplate(
@@ -101,9 +94,9 @@ int main()
         cout << "[B] External: SECRET=\"" << secretStr << "\"\n"
              << "    C = RSA-OAEP(tpm-pub, SECRET) = " << C.size() << " bytes\n\n";
 
-        // C+D. External opens salted session, calls RSA_Decrypt over it. Run twice: OFF then ON.
-        runDelivery(tpm, ek.handle, ekPub, wrapKey.handle, C, SECRET, false);
-        runDelivery(tpm, ek.handle, ekPub, wrapKey.handle, C, SECRET, true);
+        // C+D. External opens salted session with response encryption ON, calls RSA_Decrypt.
+        cout << "[C+D] Delivery (response encryption ON):\n";
+        runDelivery(tpm, ek.handle, ekPub, wrapKey.handle, C, SECRET);
 
         tpm.FlushContext(wrapKey.handle);
         tpm.FlushContext(ek.handle);
