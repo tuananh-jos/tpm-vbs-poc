@@ -94,14 +94,14 @@ int main()
         TPMT_PUBLIC ekPub = ek.outPublic;
         cout << "       handle 0x" << hex << ek.handle.handle << dec << "\n\n";
 
-        // B. Server encrypts SECRET to tpm-pub (RSA-OAEP). Hands ciphertext C to client.
+        // B. External encrypts SECRET to tpm-pub (RSA-OAEP). Hands ciphertext C to TPM.
         string secretStr = "TOP-SECRET-2026!!";
         ByteVec SECRET(secretStr.begin(), secretStr.end());
         ByteVec C = wrapKey.outPublic.Encrypt(SECRET, null);
-        cout << "[B] Server: SECRET=\"" << secretStr << "\"\n"
+        cout << "[B] External: SECRET=\"" << secretStr << "\"\n"
              << "    C = RSA-OAEP(tpm-pub, SECRET) = " << C.size() << " bytes\n\n";
 
-        // C+D. Client opens salted session, calls RSA_Decrypt over it. Run twice: OFF then ON.
+        // C+D. External opens salted session, calls RSA_Decrypt over it. Run twice: OFF then ON.
         runDelivery(tpm, ek.handle, ekPub, wrapKey.handle, C, SECRET, false);
         runDelivery(tpm, ek.handle, ekPub, wrapKey.handle, C, SECRET, true);
 

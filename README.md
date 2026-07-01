@@ -18,7 +18,7 @@ only `encryptedSalt` and AES-128-CFB ciphertext — it has no path to `channelKe
 | Name | Role |
 |------|------|
 | `SECRET` | Payload to be delivered confidentially. |
-| `wrapKey` / `tpm-pub` / `tpm-priv` | RSA-2048 decrypt key created **inside** the TPM. Server encrypts `SECRET` to `tpm-pub`; only `tpm-priv` (never leaves the chip) can open it. |
+| `wrapKey` / `tpm-pub` / `tpm-priv` | RSA-2048 decrypt key created **inside** the TPM. External encrypts `SECRET` to `tpm-pub`; only `tpm-priv` (never leaves the chip) can open it. |
 | `EK` | Endorsement Key — RSA-2048 restricted decrypt key. Used **only** to bootstrap the salted session (salt key). |
 | `channelKey` | Ephemeral AES-128 key derived from the salted session. Protects the response parameter on the wire. The transport cannot see it. |
 
@@ -31,8 +31,8 @@ A. Prepare
    1. TPM creates wrapKey (RSA-2048 decrypt). Exports tpm-pub.
    2. TPM creates EK (RSA-2048 restricted decrypt). Exports EK pub.
 
-B. Server encrypts
-   3. Server: C = RSA-OAEP(tpm-pub, SECRET)  ->  hands C to client.
+B. External encrypts
+   3. External: C = RSA-OAEP(tpm-pub, SECRET)  ->  hands C to client.
 
 C. Client establishes encrypted channel
    4. Client picks a random salt, OAEP-encrypts it to EK pub (-> encryptedSalt).
@@ -100,7 +100,7 @@ Connected to real TPM via Windows TBS.
 [A.2] CreatePrimary: EK (RSA-2048, ENDORSEMENT)...
        handle 0x80xxxxxx
 
-[B] Server: SECRET="TOP-SECRET-2026!!"
+[B] External: SECRET="TOP-SECRET-2026!!"
     C = RSA-OAEP(tpm-pub, SECRET) = 256 bytes
 
 ================  Delivery: RESPONSE ENCRYPTION OFF  ================
