@@ -36,8 +36,8 @@ int main()
         tpm._SetDevice(tbs);
         cout << "    OK\n\n";
 
-        // -- key pair (tpm-pub / tpm-priv) --
-        cout << "[2] TPM creates key pair inside chip (tpm-priv never leaves).\n";
+        // -- key pair (SPCK-pub / SPCK-priv) --
+        cout << "[2] TPM creates key pair inside chip (SPCK-priv never leaves).\n";
         TPMT_PUBLIC keyPairTemplate(
             TPM_ALG_ID::SHA1,
             TPMA_OBJECT::decrypt | TPMA_OBJECT::userWithAuth | TPMA_OBJECT::sensitiveDataOrigin
@@ -46,9 +46,9 @@ int main()
             TPMS_RSA_PARMS(null, TPMS_SCHEME_OAEP(TPM_ALG_ID::SHA1), 2048, 65537),
             TPM2B_PUBLIC_KEY_RSA());
         auto keyPair = tpm.CreatePrimary(TPM_RH::OWNER, null, keyPairTemplate, null, null);
-        ByteVec tpmPub = keyPair.outPublic.unique->toBytes();
+        ByteVec spckPub = keyPair.outPublic.unique->toBytes();
         cout << "    handle  : 0x" << hex << keyPair.handle.handle << dec << "\n";
-        cout << "    tpm-pub : " << toHex(tpmPub) << "\n\n";
+        cout << "    SPCK-pub : " << toHex(spckPub) << "\n\n";
 
         // -- EK --
         cout << "[3] TPM creates EK inside chip (EK-priv never leaves).\n";
@@ -71,9 +71,9 @@ int main()
         ByteVec sessionKey(sessionKeyStr.begin(), sessionKeyStr.end());
         cout << "[4] External: sessionKey = \"" << sessionKeyStr << "\"\n";
         ByteVec C = keyPair.outPublic.Encrypt(sessionKey, null);
-        cout << "    C = tpm-pub(sessionKey)\n";
+        cout << "    C = SPCK-pub(sessionKey)\n";
         cout << "    C : " << toHex(C) << "\n";
-        cout << "    Only tpm-priv (inside chip) can open C.\n\n";
+        cout << "    Only SPCK-priv (inside chip) can open C.\n\n";
 
         // -- Salt --
         cout << "[5] External generates salt.\n";
@@ -95,8 +95,8 @@ int main()
         cout << "    Session established.\n\n";
 
         // -- Decrypt --
-        cout << "[7] RSA_Decrypt(tpm-priv, C) over session.\n";
-        cout << "    tpm-priv decrypts C -> sessionKey (inside chip, never on transport).\n";
+        cout << "[7] RSA_Decrypt(SPCK-priv, C) over session.\n";
+        cout << "    SPCK-priv decrypts C -> sessionKey (inside chip, never on transport).\n";
         cout << "    TPM sends channelKey(sessionKey) over transport.\n";
         cout << "    External uses channelKey to decrypt -> sessionKey plaintext in RAM.\n";
         ByteVec recovered = tpm[session].RSA_Decrypt(
