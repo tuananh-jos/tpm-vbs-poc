@@ -32,7 +32,7 @@ int main()
             TPM2B_PUBLIC_KEY_RSA());
         auto wrapKey = tpm.CreatePrimary(TPM_RH::OWNER, null, wrapTemplate, null, null);
 
-        // EK: restricted decrypt key used only as salt key to bootstrap channelKey.
+        // EK: restricted decrypt key used only as salt key to bootstrap secret.
         TPMT_PUBLIC ekTemplate(
             TPM_ALG_ID::SHA1,
             TPMA_OBJECT::decrypt | TPMA_OBJECT::restricted | TPMA_OBJECT::fixedTPM
@@ -43,29 +43,30 @@ int main()
             TPM2B_PUBLIC_KEY_RSA());
         auto ek = tpm.CreatePrimary(TPM_RH::ENDORSEMENT, null, ekTemplate, null, null);
 
-        // External encrypts SECRET to tpm-pub.
-        string secretStr = "TOP-SECRET-2026!!";
-        ByteVec SECRET(secretStr.begin(), secretStr.end());
-        ByteVec C = wrapKey.outPublic.Encrypt(SECRET, null);
+        // External encrypts sessionKey to tpm-pub.
+        string sessionKeyStr = "TOP-SECRET-2026!!";
+        ByteVec sessionKey(sessionKeyStr.begin(), sessionKeyStr.end());
+        ByteVec C = wrapKey.outPublic.Encrypt(sessionKey, null);
 
-        // Salted HMAC session: salt OAEP-encrypted to EK-pub so transport never sees channelKey.
-        // Response encryption ON: TPM encrypts RSA_Decrypt output with channelKey before wire.
+        // Salted HMAC session: salt OAEP-encrypted to EK-pub so transport never sees secret.
+        // Both sides derive secret (channelKey) from salt independently.
+        // Response encryption ON: TPM re-encrypts sessionKey with secret before wire.
         ByteVec salt          = Helpers::RandomBytes(Crypto::HashLength(TPM_ALG_ID::SHA1));
         ByteVec encryptedSalt = ek.outPublic.EncryptSessionSalt(salt);
-        AUTH_SESSION channel  = tpm.StartAuthSession(
+        AUTH_SESSION session   = tpm.StartAuthSession(
             ek.handle, TPM_RH_NULL, TPM_SE::HMAC, TPM_ALG_ID::SHA1,
             TPMA_SESSION::continueSession | TPMA_SESSION::encrypt,
             TPMT_SYM_DEF(TPM_ALG_ID::AES, 128, TPM_ALG_ID::CFB),
             salt, encryptedSalt);
 
-        // TPM decrypts C with wrapKey-priv, returns SECRET encrypted with channelKey.
-        ByteVec recovered = tpm[channel].RSA_Decrypt(
+        // TPM decrypts C with wrapKey-priv, returns sessionKey encrypted with secret.
+        ByteVec recovered = tpm[session].RSA_Decrypt(
             wrapKey.handle, C, TPMS_NULL_ASYM_SCHEME(), null);
 
         cout << "recovered : \"" << string(recovered.begin(), recovered.end()) << "\"\n";
-        cout << "correct   : " << (recovered == SECRET ? "yes" : "NO -- MISMATCH") << "\n";
+        cout << "correct   : " << (recovered == sessionKey ? "yes" : "NO -- MISMATCH") << "\n";
 
-        tpm.FlushContext(channel);
+        tpm.FlushContext(session);
         tpm.FlushContext(wrapKey.handle);
         tpm.FlushContext(ek.handle);
     }
