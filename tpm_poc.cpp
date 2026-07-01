@@ -49,7 +49,7 @@ int main()
         ByteVec C = wrapKey.outPublic.Encrypt(sessionKey, null);
 
         // Salted HMAC session: salt OAEP-encrypted to EK-pub so transport never sees secret.
-        // Both sides derive secret (channelKey) from salt independently.
+        // Both sides derive secret from salt independently.
         // Response encryption ON: TPM re-encrypts sessionKey with secret before wire.
         ByteVec salt          = Helpers::RandomBytes(Crypto::HashLength(TPM_ALG_ID::SHA1));
         ByteVec encryptedSalt = ek.outPublic.EncryptSessionSalt(salt);
