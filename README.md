@@ -1,12 +1,16 @@
-# TPM 2.0 VBS-style Secret Delivery — PoC (TSS.CPP / TSS.MSR)
+# TPM 2.0 Secret Delivery via Salted Session — PoC (TSS.CPP / TSS.MSR)
 
-Proof-of-concept demonstrating how Windows Virtualization-Based Security (VBS) can receive a
-`SECRET` from a remote Server across an **untrusted transport (VTL0)** — the layer between the
-guest OS and the TPM — without the plaintext ever appearing on the wire.
+Proof-of-concept demonstrating **salted HMAC session + response parameter encryption** on
+TPM 2.0: the session's symmetric key (`channelKey`) never appears in plaintext on the VTL0
+transport, so a passive observer on VTL0 cannot decrypt the TPM response even if it captures
+every byte on the wire.
 
-The mechanism is transport-layer parameter encryption using a **salted HMAC session**: VBS and
-the TPM jointly derive an ephemeral symmetric key (`channelKey`) that VTL0 cannot compute, then
-the TPM encrypts the `RSA_Decrypt` response with that key before the bytes cross VTL0.
+**Core mechanism:** VBS OAEP-encrypts a random salt to the EK public key and passes only
+`encryptedSalt` to the TPM via VTL0. The TPM decrypts the salt with EK private (which never
+leaves the chip), both sides independently derive `channelKey`, and the TPM encrypts the
+`RSA_Decrypt` response with `channelKey` before the bytes cross VTL0. VTL0 sees only
+`encryptedSalt` and AES-128-CFB ciphertext — it has no path to `channelKey` and therefore
+cannot recover `SECRET`.
 
 ---
 
@@ -45,12 +49,15 @@ D. VBS recovers SECRET
       TSS.CPP transparently decrypts with channelKey → VBS sees SECRET.
 ```
 
-What VTL0 (step 5 wire):
+What VTL0 sees on the wire (step 5):
 
-| Encryption | What VTL0 sees |
-|-----------|----------------|
-| OFF | `SECRET` plaintext bytes inside the TPM response |
-| ON  | AES-128-CFB ciphertext — `SECRET` not recoverable without `channelKey` |
+| Mode | VTL0 sees | Can recover SECRET? |
+|------|-----------|---------------------|
+| OFF  | `SECRET` plaintext in TPM response | YES — leaked |
+| ON   | AES-128-CFB ciphertext; `channelKey` never crossed VTL0 in plaintext | NO — protected |
+
+The protection comes from `channelKey` being invisible to VTL0, not merely from the response
+being encrypted — without the key, the ciphertext is unrecoverable.
 
 ---
 
