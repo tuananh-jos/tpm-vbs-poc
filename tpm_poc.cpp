@@ -25,7 +25,7 @@ static string toHex(const ByteVec& v)
 int main()
 {
     try {
-        // ── Connect ──────────────────────────────────────────────────────────
+        // -- Connect --
         cout << "[1] Connecting to real TPM via Windows TBS...\n";
         TpmTbsDevice tbs;
         if (!tbs.Connect()) {
@@ -36,9 +36,8 @@ int main()
         tpm._SetDevice(tbs);
         cout << "    OK\n\n";
 
-        // ── wrapKey ───────────────────────────────────────────────────────────
-        cout << "[2] TPM2_CreatePrimary: wrapKey (RSA-2048, non-restricted, OWNER hierarchy)\n";
-        cout << "    tpm-priv will never leave the chip.\n";
+        // -- wrapKey --
+        cout << "[2] TPM creates wrapKey inside chip (tpm-priv never leaves).\n";
         TPMT_PUBLIC wrapTemplate(
             TPM_ALG_ID::SHA1,
             TPMA_OBJECT::decrypt | TPMA_OBJECT::userWithAuth | TPMA_OBJECT::sensitiveDataOrigin
@@ -49,13 +48,11 @@ int main()
         auto wrapKey = tpm.CreatePrimary(TPM_RH::OWNER, null, wrapTemplate, null, null);
         ByteVec tpmPub = wrapKey.outPublic.unique->toBytes();
         cout << "    handle  : 0x" << hex << wrapKey.handle.handle << dec << "\n";
-        cout << "    tpm-pub : " << tpmPub.size() << " bytes  "
-             << toHex(ByteVec(tpmPub.begin(), tpmPub.begin() + 8)) << "...\n\n";
+        cout << "    tpm-pub : " << toHex(tpmPub) << "\n\n";
 
-        // ── EK ───────────────────────────────────────────────────────────────
-        cout << "[3] TPM2_CreatePrimary: EK (RSA-2048, restricted, ENDORSEMENT hierarchy)\n";
-        cout << "    EK-priv will never leave the chip.\n";
-        cout << "    Role: salt key only — used to bootstrap secret, not to decrypt sessionKey.\n";
+        // -- EK --
+        cout << "[3] TPM creates EK inside chip (EK-priv never leaves).\n";
+        cout << "    Role: used only to hide salt from transport.\n";
         TPMT_PUBLIC ekTemplate(
             TPM_ALG_ID::SHA1,
             TPMA_OBJECT::decrypt | TPMA_OBJECT::restricted | TPMA_OBJECT::fixedTPM
@@ -67,51 +64,48 @@ int main()
         auto ek = tpm.CreatePrimary(TPM_RH::ENDORSEMENT, null, ekTemplate, null, null);
         ByteVec ekPubBytes = ek.outPublic.unique->toBytes();
         cout << "    handle  : 0x" << hex << ek.handle.handle << dec << "\n";
-        cout << "    EK-pub  : " << ekPubBytes.size() << " bytes  "
-             << toHex(ByteVec(ekPubBytes.begin(), ekPubBytes.begin() + 8)) << "...\n\n";
+        cout << "    EK-pub  : " << toHex(ekPubBytes) << "\n\n";
 
-        // ── External encrypts sessionKey ──────────────────────────────────────
+        // -- External encrypts sessionKey --
         string sessionKeyStr = "TOP-SECRET-2026!!";
         ByteVec sessionKey(sessionKeyStr.begin(), sessionKeyStr.end());
         cout << "[4] External: sessionKey = \"" << sessionKeyStr << "\"\n";
-        cout << "    Encrypting sessionKey with tpm-pub (RSA-OAEP)...\n";
         ByteVec C = wrapKey.outPublic.Encrypt(sessionKey, null);
-        cout << "    C (" << C.size() << " bytes) : " << toHex(C) << "\n";
-        cout << "    sessionKey is now opaque — only the TPM can open C.\n\n";
+        cout << "    C = tpm-pub(sessionKey)\n";
+        cout << "    C : " << toHex(C) << "\n";
+        cout << "    Only the TPM can open C.\n\n";
 
-        // ── Salt + session ────────────────────────────────────────────────────
-        cout << "[5] External: generating salt (random bytes)...\n";
+        // -- Salt --
+        cout << "[5] External generates salt.\n";
         ByteVec salt = Helpers::RandomBytes(Crypto::HashLength(TPM_ALG_ID::SHA1));
-        cout << "    salt (" << salt.size() << " bytes) : " << toHex(salt) << "\n";
-
-        cout << "    Encrypting salt to EK-pub (RSA-OAEP) -> encryptedSalt...\n";
+        cout << "    salt          : " << toHex(salt) << "\n";
         ByteVec encryptedSalt = ek.outPublic.EncryptSessionSalt(salt);
-        cout << "    encryptedSalt (" << encryptedSalt.size() << " bytes) : "
-             << toHex(ByteVec(encryptedSalt.begin(), encryptedSalt.begin() + 16)) << "...\n";
-        cout << "    Transport only ever sees encryptedSalt — salt itself is hidden.\n\n";
+        cout << "    encryptedSalt = EK-pub(salt)\n";
+        cout << "    encryptedSalt : " << toHex(encryptedSalt) << "\n";
+        cout << "    Transport only sees encryptedSalt, not salt.\n\n";
 
-        cout << "[6] TPM2_StartAuthSession (salted HMAC, AES-128-CFB, encrypt ON)...\n";
-        cout << "    TPM decrypts encryptedSalt with EK-priv -> recovers salt\n";
-        cout << "    Both sides: secret = KDF(salt)  [neither side transmits secret]\n";
+        // -- Session --
+        cout << "[6] StartAuthSession: TPM decrypts encryptedSalt with EK-priv -> salt.\n";
+        cout << "    Both sides derive secret = KDF(salt). Secret never transmitted.\n";
         AUTH_SESSION session = tpm.StartAuthSession(
             ek.handle, TPM_RH_NULL, TPM_SE::HMAC, TPM_ALG_ID::SHA1,
             TPMA_SESSION::continueSession | TPMA_SESSION::encrypt,
             TPMT_SYM_DEF(TPM_ALG_ID::AES, 128, TPM_ALG_ID::CFB),
             salt, encryptedSalt);
-        cout << "    Session established. secret shared between external and TPM.\n\n";
+        cout << "    Session established.\n\n";
 
-        // ── RSA_Decrypt over session ──────────────────────────────────────────
-        cout << "[7] TPM2_RSA_Decrypt(wrapKey, C) over session...\n";
-        cout << "    Inside TPM : wrapKey-priv decrypts C -> sessionKey\n";
-        cout << "    Inside TPM : sessionKey encrypted with secret -> sent over transport\n";
-        cout << "    TSS.CPP    : decrypts response with secret -> sessionKey in memory\n";
+        // -- Decrypt --
+        cout << "[7] RSA_Decrypt(wrapKey, C) over session.\n";
+        cout << "    TPM decrypts C -> sessionKey (inside chip).\n";
+        cout << "    TPM sends secret(sessionKey) over transport.\n";
+        cout << "    TSS.CPP decrypts -> sessionKey in memory.\n";
         ByteVec recovered = tpm[session].RSA_Decrypt(
             wrapKey.handle, C, TPMS_NULL_ASYM_SCHEME(), null);
-        cout << "    recovered  : \"" << string(recovered.begin(), recovered.end()) << "\"\n";
-        cout << "    correct    : " << (recovered == sessionKey ? "yes" : "NO -- MISMATCH") << "\n\n";
+        cout << "    recovered : \"" << string(recovered.begin(), recovered.end()) << "\"\n";
+        cout << "    correct   : " << (recovered == sessionKey ? "yes" : "NO -- MISMATCH") << "\n\n";
 
-        // ── Cleanup ───────────────────────────────────────────────────────────
-        cout << "[8] TPM2_FlushContext: releasing session, wrapKey, EK handles.\n";
+        // -- Cleanup --
+        cout << "[8] FlushContext: releasing session, wrapKey, EK.\n";
         tpm.FlushContext(session);
         tpm.FlushContext(wrapKey.handle);
         tpm.FlushContext(ek.handle);
