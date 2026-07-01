@@ -86,7 +86,7 @@ int main()
 
         // -- Session --
         cout << "[6] StartAuthSession: TPM decrypts encryptedSalt with EK-priv -> salt.\n";
-        cout << "    Both sides derive secret = KDF(salt). Secret never transmitted.\n";
+        cout << "    Both sides derive channelKey = KDF(salt). channelKey never transmitted.\n";
         AUTH_SESSION session = tpm.StartAuthSession(
             ek.handle, TPM_RH_NULL, TPM_SE::HMAC, TPM_ALG_ID::SHA1,
             TPMA_SESSION::continueSession | TPMA_SESSION::encrypt,
@@ -96,9 +96,9 @@ int main()
 
         // -- Decrypt --
         cout << "[7] RSA_Decrypt(tpm-priv, C) over session.\n";
-        cout << "    tpm-priv decrypts C -> sessionKey (inside chip).\n";
-        cout << "    TPM sends secret(sessionKey) over transport.\n";
-        cout << "    TSS.CPP decrypts -> sessionKey in memory.\n";
+        cout << "    tpm-priv decrypts C -> sessionKey (inside chip, never on transport).\n";
+        cout << "    TPM sends channelKey(sessionKey) over transport.\n";
+        cout << "    External uses channelKey to decrypt -> sessionKey plaintext in RAM.\n";
         ByteVec recovered = tpm[session].RSA_Decrypt(
             keyPair.handle, C, TPMS_NULL_ASYM_SCHEME(), null);
         cout << "    recovered : \"" << string(recovered.begin(), recovered.end()) << "\"\n";
