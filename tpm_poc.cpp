@@ -1,9 +1,9 @@
 /*
- *  vbs_poc.cpp  --  TPM 2.0 secret delivery via salted session (TSS.CPP / TSS.MSR)
+ *  tpm_poc.cpp  --  TPM 2.0 secret delivery via salted session (TSS.CPP / TSS.MSR)
  *
- *  Demonstrates that channelKey never appears in plaintext on the VTL0 transport:
+ *  Demonstrates that channelKey never appears in plaintext on the transport:
  *    - salt is OAEP-encrypted to EK pub; only the TPM can recover it with EK priv
- *    - both sides derive channelKey independently; VTL0 never sees it
+ *    - both sides derive channelKey independently; the transport never sees it
  *    - TPM encrypts RSA_Decrypt response with channelKey before bytes leave the chip
  *
  *  Run as Administrator (requires Windows TBS access to the real TPM chip).
@@ -94,14 +94,14 @@ int main()
         TPMT_PUBLIC ekPub = ek.outPublic;
         cout << "       handle 0x" << hex << ek.handle.handle << dec << "\n\n";
 
-        // B. Server encrypts SECRET to tpm-pub (RSA-OAEP). Hands ciphertext C to VBS.
-        string secretStr = "VBS-TOP-SECRET-2026!!";
+        // B. Server encrypts SECRET to tpm-pub (RSA-OAEP). Hands ciphertext C to client.
+        string secretStr = "TOP-SECRET-2026!!";
         ByteVec SECRET(secretStr.begin(), secretStr.end());
         ByteVec C = wrapKey.outPublic.Encrypt(SECRET, null);
         cout << "[B] Server: SECRET=\"" << secretStr << "\"\n"
-             << "    C = RSA-OAEP(tpm-pub, SECRET) = " << C.size() << " bytes -> VBS\n\n";
+             << "    C = RSA-OAEP(tpm-pub, SECRET) = " << C.size() << " bytes\n\n";
 
-        // C+D. VBS opens salted session, calls RSA_Decrypt over it. Run twice: OFF then ON.
+        // C+D. Client opens salted session, calls RSA_Decrypt over it. Run twice: OFF then ON.
         runDelivery(tpm, ek.handle, ekPub, wrapKey.handle, C, SECRET, false);
         runDelivery(tpm, ek.handle, ekPub, wrapKey.handle, C, SECRET, true);
 

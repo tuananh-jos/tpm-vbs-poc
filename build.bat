@@ -25,9 +25,9 @@ call "%VCVARS%" >nul
 set CL_FLAGS=/nologo /std:c++17 /EHsc /MD /DWIN32 /D_WINSOCK_DEPRECATED_NO_WARNINGS /I"%TSS%\include"
 set LINK_FLAGS="%TSS%\bin\x64\Release\TSS.CPP.lib" ws2_32.lib
 
-cl %CL_FLAGS% vbs_poc.cpp /Fe:vbs_poc.exe /link %LINK_FLAGS%
+cl %CL_FLAGS% tpm_poc.cpp /Fe:tpm_poc.exe /link %LINK_FLAGS%
 if %ERRORLEVEL% neq 0 ( echo BUILD FAILED. & exit /b %ERRORLEVEL% )
 
 copy /Y "%TSS%\bin\x64\Release\TSS.CPP.dll" "%~dp0TSS.CPP.dll" >nul
-echo BUILD OK -- vbs_poc.exe ready.
-echo Run as Administrator: vbs_poc.exe
+echo BUILD OK -- tpm_poc.exe ready.
+echo Run as Administrator: tpm_poc.exe
