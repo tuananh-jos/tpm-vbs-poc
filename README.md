@@ -114,57 +114,35 @@ Both modes produce the same PoC result. The difference is:
 
 ---
 
-## Prerequisites
+## Quick start
 
-- **Windows** with Visual Studio 2022 (Community is fine) — the `cl.exe` toolchain.
-- **Microsoft TSS.MSR** (TSS.CPP) — C++ TPM API library. Must be cloned and built (see below).
-- **TPM simulator** (`ms-tpm-20-ref`) — only needed if you do **not** have a real TPM chip.
+### Step 1 — check if you have a real TPM
 
-> **Which simulator?** TSS.CPP's `TpmTcpDevice` speaks the Microsoft simulator TCP protocol
-> (command port **2321**, platform port **2322**). This is **not** compatible with `swtpm`.
-> Use `ms-tpm-20-ref` or the legacy `Simulator.exe`.
+```powershell
+Get-Tpm
+```
+
+- `TpmPresent: True` + `TpmReady: True` → go to **Path A** (real TPM, no simulator needed)
+- Otherwise → go to **Path B** (simulator)
 
 ---
 
-## Building from source
+## Path A — Real hardware TPM
 
-### 1. Get and build TSS.CPP
+### Build
 
-TSS.CPP is the C++ library that provides the TPM API (`tpm.CreatePrimary()`,
-`tpm.StartAuthSession()`, `tpm.RSA_Decrypt()`, …). Without it you would have to hand-craft
-binary TPM command packets. Building it produces `TSS.CPP.lib` (linked into the exe) and
-`TSS.CPP.dll` (needed at runtime).
+You need TSS.CPP (the TPM API library) and this PoC. No simulator required.
+
+**1. Clone and build TSS.CPP:**
 
 ```bat
 git clone https://github.com/microsoft/TSS.MSR.git
 ```
 
-Open `TSS.MSR\TSS.CPP\TSS.CPP.sln` in Visual Studio 2019 or 2022, select
-**Release / x64**, and build the `TSS.CPP` project.
+Open `TSS.MSR\TSS.CPP\TSS.CPP.sln` in Visual Studio 2019/2022, select **Release / x64**,
+build the `TSS.CPP` project. Output: `TSS.MSR\TSS.CPP\bin\x64\Release\TSS.CPP.lib` + `TSS.CPP.dll`.
 
-Output: `TSS.MSR\TSS.CPP\bin\x64\Release\TSS.CPP.lib` and `TSS.CPP.dll`.
-
-### 2. Get and build the TPM simulator
-
-The TPM is normally a chip soldered onto the motherboard. The simulator is a software replica
-that listens on TCP 2321/2322 and behaves exactly like real hardware — so the PoC works
-without a physical TPM chip.
-
-```bat
-git clone https://github.com/microsoft/ms-tpm-20-ref.git
-cd ms-tpm-20-ref\TPMCmd
-cmake -B build -A x64
-cmake --build build --config Release
-```
-
-Output: `ms-tpm-20-ref\TPMCmd\build\Simulator\Release\Simulator.exe`.
-
-> **Note:** building the simulator requires OpenSSL. The easiest way on Windows is to install
-> it via `winget install ShiningLight.OpenSSL` or use a pre-built binary from
-> https://slproweb.com/products/Win32OpenSSL.html, then add its `lib` and `include` to the
-> CMake prefix path if the configure step complains.
-
-### 3. Build this PoC
+**2. Clone and build this PoC:**
 
 ```bat
 git clone https://github.com/tuananh-jos/tpm-vbs-poc.git
@@ -172,36 +150,9 @@ cd tpm-vbs-poc
 build.bat C:\path\to\TSS.MSR\TSS.CPP
 ```
 
-`build.bat` auto-detects Visual Studio, compiles `vbs_poc.cpp`, and copies `TSS.CPP.dll`
-next to the executable (the DLL must be in the same directory at runtime).
+### Run
 
----
-
-## Running
-
-### Mode 1 — Simulator (default, full wire tap)
-
-**Step 1** — start the simulator in a separate window (or minimized):
-
-```bat
-"C:\Users\Tai Khoan\Documents\tpm-work\sim-build2\Simulator\Simulator.exe"
-```
-
-Leave it running. It listens on TCP ports 2321 and 2322.
-
-**Step 2** — run the PoC:
-
-```bat
-vbs_poc.exe
-```
-
-> **Rerunning:** if the PoC exits abnormally, the simulator may still hold loaded key handles.
-> Restart the simulator before running again (the normal exit path flushes all handles, but a
-> crash skips that). The error `TPM_RC::OBJECT_MEMORY` is the symptom.
-
-### Mode 2 — Real hardware TPM (no wire tap)
-
-No simulator needed. Run as Administrator:
+Run as Administrator:
 
 ```bat
 vbs_poc.exe --real-tpm
@@ -213,24 +164,22 @@ Expected output:
 Connected to REAL TPM via Windows TBS. (No VTL0 wire tap available.)
 
 [A.1] TPM2_CreatePrimary: creating wrapKey (RSA-2048 decrypt) in OWNER hierarchy...
-       -> handle 0x80000000  tpm-pub = 256-byte RSA modulus
+       -> handle 0x80xxxxxx  tpm-pub = 258-byte RSA modulus
        -> tpm-priv NEVER leaves the chip.
 [A.2] TPM2_CreatePrimary: creating EK (RSA-2048 restricted decrypt) in ENDORSEMENT hierarchy...
-       -> handle 0x80000001  (used only as salt key for salted session)
+       -> handle 0x80xxxxxx  (used only as salt key for salted session)
 
 [B]   Server: SECRET = "VBS-TOP-SECRET-2026!!" (21 bytes)
       Server: RSA-OAEP encrypting SECRET to tpm-pub...
       Server: C = tpm-pub(SECRET) = 256 bytes ciphertext  -> handed to VBS.
 
 ================  Delivery: RESPONSE ENCRYPTION OFF  ================
-  channel: salted HMAC session, tpmKey = EK, 20-byte salt, AES-128-CFB
   Wire tap: N/A (real TPM uses physical SPI/LPC bus -- needs logic analyzer).
   Expected: OFF leaks plaintext on bus; ON protects with AES-128-CFB.
   VBS recovered SECRET                  : "VBS-TOP-SECRET-2026!!"
   recovered == original SECRET?         : yes
 
 ================  Delivery: RESPONSE ENCRYPTION ON   ================
-  channel: salted HMAC session, tpmKey = EK, 20-byte salt, AES-128-CFB
   Wire tap: N/A (real TPM uses physical SPI/LPC bus -- needs logic analyzer).
   Expected: OFF leaks plaintext on bus; ON protects with AES-128-CFB.
   VBS recovered SECRET                  : "VBS-TOP-SECRET-2026!!"
@@ -239,10 +188,58 @@ Connected to REAL TPM via Windows TBS. (No VTL0 wire tap available.)
 [Cleanup] TPM2_FlushContext: releasing wrapKey and EK handles.
 ```
 
-The wire tap is unavailable because the real TPM communicates over a physical SPI or LPC bus.
-To observe the OFF vs ON difference on real hardware you would need a logic analyzer attached
-to that bus. Functionally, both modes decrypt correctly and the step-by-step log confirms each
-TPM command issued.
+> Handles (`0x80xxxxxx`) are assigned dynamically by the real TPM and vary between runs.
+> Wire tap is unavailable on real hardware — to observe OFF vs ON on the physical bus you
+> need a logic analyzer on the SPI/LPC pins.
+
+---
+
+## Path B — Simulator (no real TPM)
+
+The simulator is a software replica of the TPM chip that listens on TCP 2321/2322.
+Use this if your machine has no TPM or TPM is disabled. You get a full wire tap as a bonus.
+
+### Build
+
+Same steps as Path A, plus build the simulator:
+
+**1 + 2.** Follow Path A build steps above.
+
+**3. Clone and build the simulator:**
+
+```bat
+git clone https://github.com/microsoft/ms-tpm-20-ref.git
+cd ms-tpm-20-ref\TPMCmd
+cmake -B build -A x64
+cmake --build build --config Release
+```
+
+Output: `ms-tpm-20-ref\TPMCmd\build\Simulator\Release\Simulator.exe`.
+
+> Requires OpenSSL. Install via `winget install ShiningLight.OpenSSL` if the CMake configure
+> step complains about missing OpenSSL headers/libs.
+
+> **Which simulator?** TSS.CPP speaks the Microsoft simulator TCP protocol (ports 2321/2322).
+> This is **not** compatible with `swtpm` — use `ms-tpm-20-ref` only.
+
+### Run
+
+**Step 1** — start the simulator in a separate window:
+
+```bat
+Simulator.exe
+```
+
+Leave it running (listens on ports 2321 and 2322).
+
+**Step 2** — run the PoC:
+
+```bat
+vbs_poc.exe
+```
+
+> **Rerunning:** if the PoC crashes, restart the simulator before running again — it may still
+> hold loaded key handles. Symptom: `TPM_RC::OBJECT_MEMORY`.
 
 ---
 
