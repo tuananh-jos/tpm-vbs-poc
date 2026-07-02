@@ -128,37 +128,43 @@ middle.exe
 external.exe
 ```
 
-### middle.exe output
+### middle.exe output (step [6] + CONTRAST)
 ```
-[Middle] TBS connected.
-[Middle] Pipe ready. Waiting for External...
-
-[Middle] External connected.
-
-[Middle] <- External  307 bytes
-  [Middle] -> TPM  StartAuthSession  (307 bytes, forwarded verbatim)
-  [Middle] <- TPM  StartAuthSession response  (36 bytes)
-[Middle] -> External  36 bytes
-
-[Middle] <- External  329 bytes
   [Middle] -> TPM  RSA_Decrypt  (329 bytes, forwarded verbatim)
   [Middle] <- TPM  RSA_Decrypt response  (78 bytes)
-  [Middle]         sees channelKey(sessionKey) = <17-byte hex>
-  [Middle]         no channelKey -> cannot decrypt -> forward as-is
-[Middle] -> External  78 bytes
+  [Middle]         first output param = ab3f19c4...   <- opaque, Middle cannot read
+  [Middle]         (no channelKey -> cannot interpret -> forward as-is)
+
+  [Middle] -> TPM  RSA_Decrypt  (329 bytes, forwarded verbatim)
+  [Middle] <- TPM  RSA_Decrypt response  (78 bytes)
+  [Middle]         first output param = 544f502d5345435245542d323032362121  <- CONTRAST
+  [Middle]         (no channelKey -> cannot interpret -> forward as-is)
 ```
 
-### external.exe output
-```
-[External] Connecting to Middle...
-[External] Connected.
-[External] Route: External --(IPC pipe)--> Middle --(TBS)--> TPM
+The second hex `544f502d...` decodes to `TOP-SECRET-2026!!` — Middle could read it in plaintext.
 
+### external.exe output (step [6] + CONTRAST)
+```
 [6] RSA_Decrypt  (External -> Middle -> TPM)
 
-    [External] decrypts channelKey(sessionKey) with channelKey:
-    recovered : "TOP-SECRET-2026!!"
+  [PROOF] raw bytes at External pipe boundary (BEFORE TSS.CPP ParamXcrypt):
+          encrypted param = ab3f19c4...
+          ^ same as Middle's log -- still encrypted here
+          TSS.CPP ParamXcrypt() AES-CFB-decrypts this inside external.exe...
+
+    [External] recovered = "TOP-SECRET-2026!!"
     correct   : yes
+
+================================================================
+[CONTRAST] Same RSA_Decrypt, session WITHOUT TPMA_SESSION::encrypt
+           Middle will see PLAINTEXT in its log below:
+
+  [CONTRAST SUMMARY]
+  WITH encrypt:    Middle saw = ab3f19c4...
+  WITHOUT encrypt: Middle saw = 544f502d5345435245542d323032362121
+  Decoded (no enc): "TOP-SECRET-2026!!"
+  ^ Middle read the sessionKey in plaintext!
+  TPMA_SESSION::encrypt is the ONLY difference between these two calls.
 ```
 
 ---
