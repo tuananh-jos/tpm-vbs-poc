@@ -1,5 +1,6 @@
 #include "external.h"
 #include "tpm_ipc_device.h"
+#include <io.h>
 
 static const TPMT_SYM_DEF_OBJECT Aes128Cfb { TPM_ALG_ID::AES, 128, TPM_ALG_ID::CFB };
 #define null {}
@@ -36,6 +37,10 @@ static TPMT_PUBLIC spckTemplate()
 
 int main()
 {
+    // Merge stderr into stdout so TSS.CPP's debug prints appear in order
+    _dup2(_fileno(stdout), _fileno(stderr));
+    setvbuf(stdout, nullptr, _IONBF, 0);
+
     try {
         // ----------------------------------------------------------------
         // [1] Connect to Middle via named pipe (NO TBS in this process)
@@ -92,61 +97,23 @@ int main()
         ByteVec recovered = external.Recover(session, spck.handle, C);
 
         // ── PROOF ───────────────────────────────────────────────────────────
-        // Capture raw bytes from TpmIpcDevice.GetResponse() BEFORE TSS.CPP
-        // calls ParamXcrypt(). Proves decryption happens inside external.exe.
-        // TPM_ST_SESSIONS layout: [10-13] paramSize, [14-15] TPM2B size, [16..] bytes
-        ByteVec encryptedParam;
+        // Raw bytes from pipe BEFORE TSS.CPP ParamXcrypt() runs.
+        // [TSS.CPP ParamXcrypt] log line above shows this decrypt is in external.exe.
         {
             const ByteVec& raw = ipc.LastRawResponse();
             if (raw.size() >= 18) {
                 uint16_t blobSize = (uint16_t(raw[14]) << 8) | raw[15];
+                ByteVec blob;
                 if (raw.size() >= 16u + blobSize)
-                    encryptedParam = ByteVec(raw.begin()+16, raw.begin()+16+blobSize);
-                cout << "\n  [PROOF] raw bytes at External pipe boundary (BEFORE TSS.CPP ParamXcrypt):\n";
-                cout << "          encrypted param = " << toHex(encryptedParam) << "\n";
-                cout << "          ^ same as Middle's log -- still encrypted here\n";
-                cout << "          TSS.CPP ParamXcrypt() AES-CFB-decrypts this inside external.exe...\n";
+                    blob = ByteVec(raw.begin()+16, raw.begin()+16+blobSize);
+                cout << "  [PROOF] pipe boundary (before ParamXcrypt): " << toHex(blob) << "\n";
+                cout << "          ^ same as Middle's log -- encrypted until here\n";
             }
         }
 
         cout << "\n    [External] recovered = \""
              << string(recovered.begin(), recovered.end()) << "\"\n";
         cout << "    correct   : " << (recovered == sessionKey ? "yes" : "NO -- MISMATCH") << "\n\n";
-
-        // ----------------------------------------------------------------
-        // [CONTRAST] Same RSA_Decrypt but session WITHOUT TPMA_SESSION::encrypt.
-        //   Middle will see sessionKey in PLAINTEXT -- proves session encryption
-        //   is the ONLY thing keeping Middle blind.
-        // ----------------------------------------------------------------
-        cout << "================================================================\n";
-        cout << "[CONTRAST] Same RSA_Decrypt, session WITHOUT TPMA_SESSION::encrypt\n";
-        cout << "           Middle will see PLAINTEXT in its log below:\n\n";
-        {
-            ByteVec salt2 = Helpers::RandomBytes(Crypto::HashLength(TPM_ALG_ID::SHA1));
-            ByteVec encSalt2 = spck.outPublic.EncryptSessionSalt(salt2);
-            AUTH_SESSION session2 = tpm.StartAuthSession(
-                spck.handle, TPM_RH_NULL, TPM_SE::HMAC, TPM_ALG_ID::SHA1,
-                TPMA_SESSION::continueSession,           // <-- NO encrypt flag
-                TPMT_SYM_DEF(TPM_ALG_ID::AES, 128, TPM_ALG_ID::CFB),
-                salt2, encSalt2);
-            tpm[session2].RSA_Decrypt(spck.handle, C, TPMS_NULL_ASYM_SCHEME(), {});
-            tpm.FlushContext(session2);
-
-            const ByteVec& raw2 = ipc.LastRawResponse();
-            ByteVec plaintextParam;
-            if (raw2.size() >= 18) {
-                uint16_t paramSize2 = (uint16_t(raw2[14]) << 8) | raw2[15];
-                if (raw2.size() >= 16u + paramSize2)
-                    plaintextParam = ByteVec(raw2.begin()+16, raw2.begin()+16+paramSize2);
-            }
-
-            cout << "\n  [CONTRAST SUMMARY]\n";
-            cout << "  WITH encrypt:    Middle saw = " << toHex(encryptedParam) << "\n";
-            cout << "  WITHOUT encrypt: Middle saw = " << toHex(plaintextParam) << "\n";
-            cout << "  Decoded (no enc): \"" << string(plaintextParam.begin(), plaintextParam.end()) << "\"\n";
-            cout << "  ^ Middle read the sessionKey in plaintext!\n";
-            cout << "  TPMA_SESSION::encrypt is the ONLY difference between these two calls.\n\n";
-        }
 
         // ----------------------------------------------------------------
         // [7] Cleanup
