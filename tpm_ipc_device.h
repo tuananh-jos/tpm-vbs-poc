@@ -70,4 +70,7 @@ public:
     }
 
     ByteVec GetResponse() override { return lastResp; }
+
+    // Expose raw response bytes for proof logging.
+    const ByteVec& LastRawResponse() const { return lastResp; }
 };

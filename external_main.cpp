@@ -90,8 +90,32 @@ int main()
         // ----------------------------------------------------------------
         cout << "[6] RSA_Decrypt  (External -> Middle -> TPM)\n";
         ByteVec recovered = external.Recover(session, spck.handle, C);
-        cout << "\n    [External] decrypts channelKey(sessionKey) with channelKey:\n";
-        cout << "    recovered : \"" << string(recovered.begin(), recovered.end()) << "\"\n";
+
+        // ── PROOF ───────────────────────────────────────────────────────────
+        // Show the raw bytes that TpmIpcDevice.GetResponse() received from
+        // Middle's pipe BEFORE TSS.CPP called ParamXcrypt() to decrypt.
+        // TPM_ST_SESSIONS response layout:
+        //   [0-1] tag  [2-5] size  [6-9] rc  [10-13] paramSize
+        //   [14-15] TPM2B size of first output param  [16..] encrypted bytes
+        {
+            const ByteVec& raw = ipc.LastRawResponse();
+            if (raw.size() >= 16) {
+                uint16_t blobSize = (uint16_t(raw[14]) << 8) | raw[15];
+                ByteVec blob;
+                if (raw.size() >= 16u + blobSize)
+                    blob = ByteVec(raw.begin()+16, raw.begin()+16+blobSize);
+
+                cout << "\n  [PROOF] TpmIpcDevice.GetResponse() raw bytes from pipe\n";
+                cout << "          (inside external.exe, BEFORE TSS.CPP ParamXcrypt):\n";
+                cout << "          encrypted param = " << toHex(blob) << "\n";
+                cout << "          ^ compare with Middle's log above -- same bytes\n";
+                cout << "          TSS.CPP ParamXcrypt() AES-CFB decrypts this now...\n";
+            }
+        }
+        // ────────────────────────────────────────────────────────────────────
+
+        cout << "\n    [External] recovered = \""
+             << string(recovered.begin(), recovered.end()) << "\"\n";
         cout << "    correct   : " << (recovered == sessionKey ? "yes" : "NO -- MISMATCH") << "\n\n";
 
         // ----------------------------------------------------------------
